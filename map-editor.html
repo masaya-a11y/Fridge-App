@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>2Dマップ作成ツール</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗺️</text></svg>" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Hiragino Sans", "Noto Sans JP", Meiryo, sans-serif;
+    background: #1e2530;
+    color: #e8edf4;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+  header {
+    padding: 10px 16px;
+    background: #141a22;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; font-weight: 600; margin-right: auto; }
+  main { flex: 1; display: flex; min-height: 0; }
+
+  /* ---- パレット ---- */
+  #palette {
+    width: 170px;
+    background: #2a3341;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  #palette h2 { font-size: 12px; color: #9fb0c3; font-weight: 600; }
+  .palette-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: #354152;
+    border: 1px solid #46556b;
+    border-radius: 8px;
+    cursor: grab;
+    user-select: none;
+    font-size: 13px;
+    transition: transform .08s, border-color .08s;
+  }
+  .palette-item:hover { border-color: #6ea8ff; transform: translateX(2px); }
+  .palette-item:active { cursor: grabbing; }
+  .palette-item .swatch {
+    width: 26px; height: 26px;
+    border-radius: 5px;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px;
+  }
+  .hint { font-size: 11px; color: #7d8ea3; line-height: 1.6; margin-top: auto; padding-top: 10px; border-top: 1px solid #3b4757; }
+
+  /* ---- キャンバス ---- */
+  #canvas-wrap {
+    flex: 1;
+    overflow: auto;
+    padding: 20px;
+    display: grid;
+    place-items: center;
+  }
+  #grid {
+    position: relative;
+    background: #232b37;
+    background-image:
+      linear-gradient(rgba(255,255,255,.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.06) 1px, transparent 1px);
+    border: 2px solid #46556b;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  #grid.drag-over { border-color: #6ea8ff; }
+  .block {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    cursor: grab;
+    user-select: none;
+    box-shadow: inset 0 -3px rgba(0,0,0,.25);
+  }
+  .block:active { cursor: grabbing; }
+  .block.dragging { opacity: .4; }
+  .ghost {
+    position: absolute;
+    border: 2px dashed #6ea8ff;
+    border-radius: 4px;
+    background: rgba(110,168,255,.15);
+    pointer-events: none;
+    display: none;
+  }
+
+  /* ---- ボタン・出力 ---- */
+  button {
+    font: inherit;
+    font-size: 13px;
+    padding: 7px 14px;
+    border-radius: 7px;
+    border: 1px solid #46556b;
+    background: #354152;
+    color: #e8edf4;
+    cursor: pointer;
+  }
+  button:hover { background: #40506a; }
+  button.primary { background: #2f6fdb; border-color: #2f6fdb; }
+  button.primary:hover { background: #3d7ee8; }
+  button.danger:hover { background: #a13c3c; border-color: #a13c3c; }
+  label.size-label { font-size: 12px; color: #9fb0c3; display: flex; align-items: center; gap: 5px; }
+  input[type=number] {
+    width: 56px;
+    font: inherit; font-size: 13px;
+    padding: 5px 7px;
+    background: #232b37;
+    border: 1px solid #46556b;
+    border-radius: 6px;
+    color: #e8edf4;
+  }
+
+  #output-panel {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.55);
+    z-index: 10;
+    align-items: center;
+    justify-content: center;
+  }
+  #output-panel.open { display: flex; }
+  #output-box {
+    background: #2a3341;
+    border-radius: 12px;
+    padding: 18px;
+    width: min(640px, 92vw);
+    max-height: 84vh;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  #output-box h2 { font-size: 15px; }
+  #json-out {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 12px;
+    background: #171d26;
+    border: 1px solid #46556b;
+    border-radius: 8px;
+    color: #c6e2a5;
+    padding: 12px;
+    width: 100%;
+    min-height: 260px;
+    resize: vertical;
+    white-space: pre;
+  }
+  .row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  #toast {
+    position: fixed;
+    bottom: 22px; left: 50%;
+    transform: translateX(-50%) translateY(10px);
+    background: #2f6fdb;
+    padding: 9px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s, transform .2s;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🗺️ 2Dマップ作成ツール</h1>
+  <label class="size-label">幅 <input type="number" id="cols" min="4" max="60" value="16"></label>
+  <label class="size-label">高さ <input type="number" id="rows" min="4" max="60" value="12"></label>
+  <button id="resize-btn">サイズ変更</button>
+  <button id="clear-btn" class="danger">全消去</button>
+  <button id="export-btn" class="primary">JSON書き出し</button>
+</header>
+
+<main>
+  <aside id="palette">
+    <h2>ブロックパレット</h2>
+    <!-- JSで生成 -->
+    <p class="hint">
+      ◆ パレットからグリッドへ<br>ドラッグ＆ドロップで配置<br><br>
+      ◆ 配置済みブロックは<br>ドラッグで移動<br><br>
+      ◆ 右クリック / ダブルクリック<br>で削除
+    </p>
+  </aside>
+
+  <div id="canvas-wrap">
+    <div id="grid">
+      <div class="ghost" id="ghost"></div>
+    </div>
+  </div>
+</main>
+
+<div id="output-panel">
+  <div id="output-box">
+    <h2>マップデータ（JSON）</h2>
+    <textarea id="json-out" readonly spellcheck="false"></textarea>
+    <div class="row">
+      <button id="copy-btn">コピー</button>
+      <button id="download-btn">ダウンロード (.json)</button>
+      <button id="close-btn">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+
+const CELL = 36; // 1マスのピクセルサイズ
+
+const BLOCK_TYPES = [
+  { type: "wall",   name: "壁",     color: "#8d99ae", emoji: "🧱" },
+  { type: "grass",  name: "草",     color: "#5cae5c", emoji: "🌿" },
+  { type: "water",  name: "水",     color: "#3f8fd2", emoji: "💧" },
+  { type: "sand",   name: "砂",     color: "#d8b46a", emoji: "🏖️" },
+  { type: "tree",   name: "木",     color: "#3c7a45", emoji: "🌳" },
+  { type: "rock",   name: "岩",     color: "#6b6f76", emoji: "🪨" },
+  { type: "start",  name: "スタート", color: "#e3b341", emoji: "🚩" },
+  { type: "goal",   name: "ゴール",  color: "#c0392b", emoji: "🏁" },
+];
+
+let cols = 16, rows = 12;
+// blocks: Map "x,y" -> { type, x, y }
+const blocks = new Map();
+
+const grid = document.getElementById("grid");
+const ghost = document.getElementById("ghost");
+const palette = document.getElementById("palette");
+const hint = palette.querySelector(".hint");
+const toast = document.getElementById("toast");
+
+/* ---------- パレット生成 ---------- */
+for (const bt of BLOCK_TYPES) {
+  const el = document.createElement("div");
+  el.className = "palette-item";
+  el.draggable = true;
+  el.innerHTML = `<span class="swatch" style="background:${bt.color}">${bt.emoji}</span>${bt.name}`;
+  el.addEventListener("dragstart", (e) => {
+    e.dataTransfer.setData("application/x-block", JSON.stringify({ kind: "new", type: bt.type }));
+    e.dataTransfer.effectAllowed = "copy";
+  });
+  palette.insertBefore(el, hint);
+}
+
+/* ---------- グリッド ---------- */
+function applyGridSize() {
+  grid.style.width = cols * CELL + "px";
+  grid.style.height = rows * CELL + "px";
+  grid.style.backgroundSize = `${CELL}px ${CELL}px`;
+}
+
+function cellFromEvent(e) {
+  const r = grid.getBoundingClientRect();
+  const x = Math.floor((e.clientX - r.left) / CELL);
+  const y = Math.floor((e.clientY - r.top) / CELL);
+  if (x < 0 || y < 0 || x >= cols || y >= rows) return null;
+  return { x, y };
+}
+
+function renderBlock(b) {
+  const bt = BLOCK_TYPES.find(t => t.type === b.type);
+  const el = document.createElement("div");
+  el.className = "block";
+  el.draggable = true;
+  el.dataset.key = `${b.x},${b.y}`;
+  el.style.cssText = `left:${b.x * CELL + 2}px;top:${b.y * CELL + 2}px;width:${CELL - 4}px;height:${CELL - 4}px;background:${bt.color};font-size:${CELL * 0.5}px`;
+  el.textContent = bt.emoji;
+  el.title = `${bt.name} (${b.x}, ${b.y})`;
+
+  el.addEventListener("dragstart", (e) => {
+    e.dataTransfer.setData("application/x-block", JSON.stringify({ kind: "move", from: el.dataset.key }));
+    e.dataTransfer.effectAllowed = "move";
+    el.classList.add("dragging");
+  });
+  el.addEventListener("dragend", () => el.classList.remove("dragging"));
+  el.addEventListener("contextmenu", (e) => { e.preventDefault(); removeBlock(el.dataset.key); });
+  el.addEventListener("dblclick", () => removeBlock(el.dataset.key));
+
+  grid.appendChild(el);
+}
+
+function addBlock(type, x, y) {
+  const key = `${x},${y}`;
+  if (blocks.has(key)) removeBlock(key);
+  const b = { type, x, y };
+  blocks.set(key, b);
+  renderBlock(b);
+}
+
+function removeBlock(key) {
+  if (!blocks.delete(key)) return;
+  const el = grid.querySelector(`.block[data-key="${key}"]`);
+  if (el) el.remove();
+}
+
+function clearAll() {
+  blocks.clear();
+  grid.querySelectorAll(".block").forEach(el => el.remove());
+}
+
+/* ---------- ドロップ処理 ---------- */
+grid.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  grid.classList.add("drag-over");
+  const c = cellFromEvent(e);
+  if (!c) { ghost.style.display = "none"; return; }
+  ghost.style.display = "block";
+  ghost.style.left = c.x * CELL + "px";
+  ghost.style.top = c.y * CELL + "px";
+  ghost.style.width = CELL + "px";
+  ghost.style.height = CELL + "px";
+});
+grid.addEventListener("dragleave", (e) => {
+  if (e.target === grid) { grid.classList.remove("drag-over"); ghost.style.display = "none"; }
+});
+grid.addEventListener("drop", (e) => {
+  e.preventDefault();
+  grid.classList.remove("drag-over");
+  ghost.style.display = "none";
+  const raw = e.dataTransfer.getData("application/x-block");
+  if (!raw) return;
+  const data = JSON.parse(raw);
+  const c = cellFromEvent(e);
+  if (!c) return;
+
+  if (data.kind === "new") {
+    addBlock(data.type, c.x, c.y);
+  } else if (data.kind === "move") {
+    const b = blocks.get(data.from);
+    if (!b) return;
+    if (data.from === `${c.x},${c.y}`) return;
+    removeBlock(data.from);
+    addBlock(b.type, c.x, c.y);
+  }
+});
+
+/* ---------- ヘッダー操作 ---------- */
+document.getElementById("resize-btn").addEventListener("click", () => {
+  const c = Math.max(4, Math.min(60, +document.getElementById("cols").value || 16));
+  const r = Math.max(4, Math.min(60, +document.getElementById("rows").value || 12));
+  cols = c; rows = r;
+  document.getElementById("cols").value = c;
+  document.getElementById("rows").value = r;
+  // 範囲外のブロックを削除
+  for (const key of [...blocks.keys()]) {
+    const b = blocks.get(key);
+    if (b.x >= cols || b.y >= rows) removeBlock(key);
+  }
+  applyGridSize();
+});
+
+document.getElementById("clear-btn").addEventListener("click", () => {
+  if (blocks.size === 0 || confirm("配置したブロックをすべて削除しますか？")) clearAll();
+});
+
+/* ---------- JSON書き出し ---------- */
+function buildJSON() {
+  const list = [...blocks.values()]
+    .sort((a, b) => a.y - b.y || a.x - b.x)
+    .map(b => ({ type: b.type, x: b.x, y: b.y }));
+  return JSON.stringify({
+    version: 1,
+    width: cols,
+    height: rows,
+    cellSize: CELL,
+    blocks: list,
+  }, null, 2);
+}
+
+const panel = document.getElementById("output-panel");
+const jsonOut = document.getElementById("json-out");
+
+document.getElementById("export-btn").addEventListener("click", () => {
+  jsonOut.value = buildJSON();
+  panel.classList.add("open");
+});
+document.getElementById("close-btn").addEventListener("click", () => panel.classList.remove("open"));
+panel.addEventListener("click", (e) => { if (e.target === panel) panel.classList.remove("open"); });
+
+document.getElementById("copy-btn").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(jsonOut.value);
+  } catch {
+    jsonOut.select();
+    document.execCommand("copy");
+  }
+  showToast("クリップボードにコピーしました");
+});
+
+document.getElementById("download-btn").addEventListener("click", () => {
+  const blob = new Blob([jsonOut.value], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "map.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast("map.json をダウンロードしました");
+});
+
+let toastTimer;
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove("show"), 1800);
+}
+
+applyGridSize();
+</script>
+</body>
+</html>
